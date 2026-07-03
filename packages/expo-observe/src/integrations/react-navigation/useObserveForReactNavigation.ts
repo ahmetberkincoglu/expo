@@ -2,6 +2,7 @@ import AppMetrics, { type MetricAttributes } from 'expo-app-metrics';
 import { use, useCallback, useEffect, useRef } from 'react';
 
 import { useAssertValueDoesNotChange } from '../../useAssertValueDoesNotChange';
+import { getNavigationRouteParams } from '../navigationConfig';
 import { ObserveReactNavigationIntegrationContext } from './context';
 import { emitTTI } from './emitTTI';
 import { getPathname } from './getPathname';
@@ -74,7 +75,10 @@ export function useObserveForReactNavigation(): MarkInteractive | null {
       // it the subtree produces the same pathname as the full state without
       // requiring access to the root navigation state from inside a leaf hook.
       const pathname = getPathname(stateForPath as NavigationStateLike | undefined) ?? route.name;
-      const routeParams = (route.params as object | undefined) ?? {};
+      const navigationParams = getNavigationRouteParams(
+        'react-navigation',
+        (route.params as object | undefined) ?? {}
+      );
 
       // Snapshot times BEFORE writing the new interactive timestamp so the
       // duplicate-detection logic below sees the previous call, not this one.
@@ -117,7 +121,7 @@ export function useObserveForReactNavigation(): MarkInteractive | null {
         timestamp,
         routeName: pathname,
         value: interactiveTimeSeconds,
-        routeParams,
+        ...navigationParams,
       });
     },
     [screenId, navigation, route, contextValue, stateForPath]

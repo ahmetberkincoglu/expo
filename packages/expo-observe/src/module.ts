@@ -1,13 +1,11 @@
-import { requireNativeModule } from 'expo';
 import AppMetrics from 'expo-app-metrics';
 
 import { initRouterIntegration } from './integrations/expo-router/init';
 import { isRouterInstalled } from './integrations/expo-router/router';
 import { initReactNavigationIntegration } from './integrations/react-navigation/init';
 import { isReactNavigationInstalled } from './integrations/react-navigation/reactNavigation';
+import native from './nativeModule';
 import type { ObserveConfig, ObserveModule } from './types';
-
-const native = requireNativeModule<ObserveModule>('ExpoObserve');
 
 const Observe: ObserveModule = new Proxy(native, {
   get(target, prop, receiver) {

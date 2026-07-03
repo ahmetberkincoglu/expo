@@ -29,6 +29,11 @@ export default function NestedStackIndex() {
         onPress={() => router.push('/examples/nested-stack/foo')}
       />
       <Button
+        title="Filtered params"
+        description="Open [p1]/[p2]?q1=1&q2=2 with p2 and q1 filtered"
+        onPress={() => router.push('/examples/nested-stack/b/c?q1=1&q2=2')}
+      />
+      <Button
         title="Nested → modal"
         description="Push into a nested stack that opens a modal"
         onPress={() => router.push('/examples/nested-stack/nested')}

@@ -1,6 +1,7 @@
 import AppMetrics from 'expo-app-metrics';
 
 import { emitTTI } from './emitTTI';
+import { getNavigationMetricParams } from '../navigationConfig';
 import { buildRoutePattern } from './routeName';
 import { optionalRouter } from './router';
 import { type RouterIntegrationStorage } from './storage';
@@ -101,6 +102,7 @@ export function initListeners(
     }
 
     const mainSession = AppMetrics.getMainSession();
+    const navigationParams = getNavigationMetricParams('expo-router', e.params, e.pathname);
 
     mainSession.addMetric({
       timestamp,
@@ -108,7 +110,7 @@ export function initListeners(
       name,
       routeName: routePattern,
       value: ttrSeconds,
-      params: { isAppLaunch, routeParams: e.params, url: e.pathname },
+      params: { isAppLaunch, ...navigationParams },
     });
     if (hasPendingInteractive) {
       await emitTTI({

@@ -2,6 +2,7 @@ import AppMetrics, { type MetricAttributes } from 'expo-app-metrics';
 import { use, useCallback, useEffect, useRef } from 'react';
 
 import { useAssertValueDoesNotChange } from '../../useAssertValueDoesNotChange';
+import { getNavigationMetricParams } from '../navigationConfig';
 import { ObserveRouterIntegrationContext } from './ObserveRouterIntegrationProvider';
 import { emitTTI } from './emitTTI';
 import { isInitialized } from './init';
@@ -68,6 +69,7 @@ export function useObserveForRouter(): MarkInteractive | null {
       // Snapshot BEFORE the write below so the deferred-TTI check sees the
       // pre-write state (lastInteractiveCall undefined until this call).
       const currentScreenData = storage.screenTimes[screenId];
+      const navigationParams = getNavigationMetricParams('expo-router', routeParams, pathname);
 
       // Record lastInteractiveCall regardless of focus so the `pageFocused`
       // listener can emit `tti = ttr` on our behalf when this call lands
@@ -88,10 +90,17 @@ export function useObserveForRouter(): MarkInteractive | null {
 
       // All async work happens after storage is updated, so a concurrent
       // pageFocused observes our writes before its own awaited writes.
+      const attributeParams = attributes?.params ?? {};
+      const safeAttributeParams = navigationParams.urlHidden
+        ? Object.fromEntries(Object.entries(attributeParams).filter(([key]) => key !== 'url'))
+        : attributeParams;
       AppMetrics.markInteractive({
         ...(attributes ?? {}),
         routeName: routePattern,
-        params: { ...(attributes?.params ?? {}), url: pathname },
+        params: {
+          ...safeAttributeParams,
+          ...navigationParams,
+        },
       });
 
       if (wasAlreadyInteractive) return;

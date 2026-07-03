@@ -100,6 +100,25 @@ describe('module Proxy', () => {
     }
   );
 
+  it('forwards object integration config to native unchanged', () => {
+    const Observe = loadModule();
+    Observe.configure({
+      environment: 'test',
+      integrations: {
+        'expo-router': { filteredParams: ['userId', 'token'] },
+        'react-navigation': { filteredParams: ['userIdRN', 'Rtoken'] },
+      },
+    });
+
+    expect(mockNative.configure).toHaveBeenCalledWith({
+      environment: 'test',
+      integrations: {
+        'expo-router': { filteredParams: ['userId', 'token'] },
+        'react-navigation': { filteredParams: ['userIdRN', 'Rtoken'] },
+      },
+    });
+  });
+
   it("calls initRouterIntegration when router is installed and integrations['expo-router'] is true", () => {
     const Observe = loadModule();
     const { initRouterIntegration } = loadInit();

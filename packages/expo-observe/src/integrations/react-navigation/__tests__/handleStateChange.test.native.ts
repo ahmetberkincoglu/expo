@@ -23,6 +23,12 @@ jest.mock('expo-app-metrics', () => {
   };
 });
 
+const mockNative = {
+  getIntegrations: jest.fn(() => ({})),
+};
+
+jest.mock('../../../nativeModule', () => ({ __esModule: true, default: mockNative }));
+
 const mockAddMetric = AppMetrics.getMainSession().addMetric as jest.Mock;
 
 function stackState(
@@ -62,6 +68,7 @@ let warnSpy: jest.SpyInstance;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockNative.getIntegrations.mockReturnValue({});
   logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
   warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   storage = createReactNavigationIntegrationStorage();
@@ -187,6 +194,27 @@ describe('createStateChangeHandler', () => {
     expect(mockAddMetric.mock.calls[0][0].params).toEqual({
       isAppLaunch: true,
       routeParams: { id: '42' },
+    });
+  });
+
+  it('filters focused route params from TTR and deferred TTI metrics', async () => {
+    mockNative.getIntegrations.mockReturnValue({
+      'react-navigation': { filteredParams: ['userId', 'token'] },
+    });
+    storage.screenTimes['a'] = { lastInteractiveCall: performance.now() };
+
+    handle(stackState([{ key: 'a', params: { userId: '1', tab: 'home' } }]));
+    await flushAsync();
+
+    expect(mockAddMetric).toHaveBeenCalledTimes(2);
+    expect(mockAddMetric.mock.calls[0][0].params).toEqual({
+      isAppLaunch: true,
+      routeParams: { tab: 'home' },
+      urlHidden: true,
+    });
+    expect(mockAddMetric.mock.calls[1][0].params).toEqual({
+      routeParams: { tab: 'home' },
+      urlHidden: true,
     });
   });
 

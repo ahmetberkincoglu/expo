@@ -29,6 +29,12 @@ jest.mock('expo-app-metrics', () => {
   };
 });
 
+const mockNative = {
+  getIntegrations: jest.fn(() => ({})),
+};
+
+jest.mock('../../../nativeModule', () => ({ __esModule: true, default: mockNative }));
+
 jest.mock('../router', () => ({ optionalRouter: undefined, isRouterInstalled: false }));
 
 const mockGetMainSession = AppMetrics.getMainSession as jest.Mock;
@@ -105,6 +111,7 @@ let warnSpy: jest.SpyInstance;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockNative.getIntegrations.mockReturnValue({});
   logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
   warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   storage = createRouterIntegrationStorage();
@@ -134,6 +141,56 @@ describe('initListeners', () => {
       routeName: '/a',
       value: expect.closeTo(0.1, 2),
       params: { isAppLaunch: true, routeParams: {}, url: '/a' },
+    });
+  });
+
+  it('filters route params from cold_ttr, warm_ttr, and deferred tti metrics', async () => {
+    mockNative.getIntegrations.mockReturnValue({
+      'expo-router': { filteredParams: ['userId', 'token'] },
+    });
+    storage.screenTimes['b'] = { lastInteractiveCall: performance.now() };
+
+    focus(events, 'a', { params: { userId: '1', tab: 'home' } });
+    await flushAsync();
+
+    dispatch(events, 'NAVIGATE');
+    focus(events, 'b', { pathname: '/b?token=secret', params: { token: 'secret', q: 'ok' } });
+    await flushAsync();
+
+    expect(mockAddMetric.mock.calls[0][0].params).toEqual({
+      isAppLaunch: true,
+      routeParams: { tab: 'home' },
+      urlHidden: true,
+    });
+    expect(mockAddMetric.mock.calls[1][0].params).toEqual({
+      isAppLaunch: false,
+      routeParams: { q: 'ok' },
+      urlHidden: true,
+    });
+    expect(mockAddMetric.mock.calls[2][0].params).toEqual({
+      isAppLaunch: false,
+      routeParams: { q: 'ok' },
+      urlHidden: true,
+    });
+  });
+
+  it('keeps URL visible when filteredParams does not remove any route param', async () => {
+    mockNative.getIntegrations.mockReturnValue({ 'expo-router': { filteredParams: ['userId'] } });
+    storage.screenTimes['a'] = { lastInteractiveCall: performance.now() };
+
+    focus(events, 'a', { pathname: '/a?token=secret', params: { token: 'secret' } });
+    await flushAsync();
+
+    expect(mockAddMetric).toHaveBeenCalledTimes(2);
+    expect(mockAddMetric.mock.calls[0][0].params).toEqual({
+      isAppLaunch: true,
+      routeParams: { token: 'secret' },
+      url: '/a?token=secret',
+    });
+    expect(mockAddMetric.mock.calls[1][0].params).toEqual({
+      isAppLaunch: true,
+      routeParams: { token: 'secret' },
+      url: '/a?token=secret',
     });
   });
 

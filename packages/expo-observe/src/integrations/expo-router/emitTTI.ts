@@ -1,5 +1,7 @@
 import type { Session } from 'expo-app-metrics';
 
+import { getNavigationMetricParams } from '../navigationConfig';
+
 export function emitTTI(args: {
   session: Pick<Session, 'addMetric'>;
   timestamp: string;
@@ -15,6 +17,9 @@ export function emitTTI(args: {
     name: 'tti',
     routeName: args.routeName,
     value: args.value,
-    params: { isAppLaunch: args.isAppLaunch, routeParams: args.routeParams, url: args.url },
+    params: {
+      isAppLaunch: args.isAppLaunch,
+      ...getNavigationMetricParams('expo-router', args.routeParams, args.url),
+    },
   });
 }

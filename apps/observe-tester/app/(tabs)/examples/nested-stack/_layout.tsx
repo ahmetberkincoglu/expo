@@ -14,6 +14,7 @@ export default function NestedStackLayout() {
       <Stack.Screen name="network" options={{ title: 'Network' }} />
       <Stack.Screen name="heavy" options={{ title: 'Heavy render' }} />
       <Stack.Screen name="[id]" options={{ title: 'Param' }} />
+      <Stack.Screen name="[p1]/[p2]" options={{ title: 'Filtered params' }} />
       <Stack.Screen name="nested" options={{ headerShown: false }} />
     </Stack>
   );

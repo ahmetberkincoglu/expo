@@ -26,6 +26,12 @@ jest.mock('expo-app-metrics', () => {
   };
 });
 
+const mockNative = {
+  getIntegrations: jest.fn(() => ({})),
+};
+
+jest.mock('../../../nativeModule', () => ({ __esModule: true, default: mockNative }));
+
 jest.mock('../init', () => ({
   __esModule: true,
   isInitialized: jest.fn(() => true),
@@ -74,6 +80,7 @@ let storage: ReactNavigationIntegrationStorage;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockNative.getIntegrations.mockReturnValue({});
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   initModule.isInitialized.mockReturnValue(true);
@@ -121,6 +128,23 @@ describe('useObserveForReactNavigation', () => {
       params: { x: 'payload' },
       routeName: '/A',
     });
+  });
+
+  it('filters route params from hook-emitted TTI', async () => {
+    mockNative.getIntegrations.mockReturnValue({ 'react-navigation': { filteredParams: ['x'] } });
+    storage.screenTimes['screen-a'] = { dispatchTime: 1000 };
+    jest.spyOn(performance, 'now').mockReturnValue(1300);
+
+    const { result } = renderHook(() => useObserveForReactNavigation(), {
+      wrapper: wrapper({ storage }),
+    });
+    await act(async () => {
+      await result.current!();
+    });
+
+    expect(mockAddMetric).toHaveBeenCalledWith(
+      expect.objectContaining({ params: { routeParams: {}, urlHidden: true } })
+    );
   });
 
   it('still records lastInteractiveCall when the screen is not focused (skips markInteractive and TTI)', async () => {
