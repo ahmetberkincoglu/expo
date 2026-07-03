@@ -1,4 +1,4 @@
-import { filterNavigationParams } from '../../navigationConfig';
+import { getNavigationRouteParams, prepareRouteParams } from '../../navigationConfig';
 
 const mockNative = {
   getIntegrations: jest.fn(() => ({})),
@@ -15,9 +15,11 @@ describe('react-navigation navigation config', () => {
     mockNative.getIntegrations.mockReturnValue({
       'react-navigation': { filteredParams: ['userId', 'token', null as unknown as string] },
     });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
 
     expect(
-      filterNavigationParams('react-navigation', { userId: '1', tab: 'posts', token: 'secret' })
+      prepareRouteParams('react-navigation', { userId: '1', tab: 'posts', token: circular })
     ).toEqual({ tab: 'posts' });
   });
 
@@ -26,13 +28,36 @@ describe('react-navigation navigation config', () => {
       'react-navigation': { filteredParams: ['token'] },
     });
 
-    expect(filterNavigationParams('react-navigation', { token: 'secret' })).toEqual({});
+    expect(prepareRouteParams('react-navigation', { token: 'secret' })).toEqual({});
+  });
+
+  it('omits only route param values that fail JSON round-trip', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(
+      prepareRouteParams('react-navigation', {
+        id: '42',
+        callback: () => {},
+        circular,
+        nested: { ok: true },
+      })
+    ).toEqual({ id: '42', nested: { ok: true } });
   });
 
   it('keeps params by default', () => {
     mockNative.getIntegrations.mockReturnValue({ 'react-navigation': true });
 
     const params = { userId: '1' };
-    expect(filterNavigationParams('react-navigation', params)).toBe(params);
+    expect(prepareRouteParams('react-navigation', params)).toEqual(params);
+  });
+
+  it('sets urlHidden when a route param is filtered', () => {
+    mockNative.getIntegrations.mockReturnValue({ 'react-navigation': { filteredParams: ['token'] } });
+
+    expect(getNavigationRouteParams('react-navigation', { token: 'secret', tab: 'posts' })).toEqual({
+      routeParams: { tab: 'posts' },
+      urlHidden: true,
+    });
   });
 });

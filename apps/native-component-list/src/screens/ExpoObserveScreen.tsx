@@ -13,10 +13,15 @@ type FilteredParamsRoute = {
     p2?: string;
     q1?: string;
     q2?: string;
+    onPress?: () => void;
   };
 };
 
-function IndexScreen() {
+function IndexScreen({
+  navigation,
+}: {
+  navigation: { navigate: (screen: string, params?: object) => void };
+}) {
   const { theme } = useTheme();
   const { markInteractive } = useObserve();
 
@@ -32,12 +37,24 @@ function IndexScreen() {
         }>
         <Text style={[styles.button, { color: theme.text.link }]}>Open filtered params</Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() =>
+          navigation.navigate('filteredParams', {
+            p1: 'p1',
+            p2: 'p2',
+            onPress: () => {},
+          })
+        }>
+        <Text style={[styles.button, { color: theme.text.link }]}>
+          Navigate with function param
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 function FilteredParamsScreen({ route }: { route: FilteredParamsRoute }) {
-  const { p1, p2, q1, q2 } = route.params ?? {};
+  const { p1, p2, q1, q2, onPress } = route.params ?? {};
   const { theme } = useTheme();
   const { markInteractive } = useObserve();
 
@@ -50,6 +67,7 @@ function FilteredParamsScreen({ route }: { route: FilteredParamsRoute }) {
       <Text style={[styles.label, { color: theme.text.secondary }]}>Route params</Text>
       <Text style={[styles.value, { color: theme.text.default }]}>p1: {p1}</Text>
       <Text style={[styles.value, { color: theme.text.default }]}>p2: {p2}</Text>
+      <Text style={[styles.value, { color: theme.text.default }]}>onPress: {typeof onPress}</Text>
       <Text style={[styles.label, { color: theme.text.secondary }]}>Query params</Text>
       <Text style={[styles.value, { color: theme.text.default }]}>q1: {q1}</Text>
       <Text style={[styles.value, { color: theme.text.default }]}>q2: {q2}</Text>
