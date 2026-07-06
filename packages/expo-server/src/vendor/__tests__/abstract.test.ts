@@ -1,5 +1,5 @@
 import type { Manifest } from '../../manifest';
-import { createRequestHandler } from '../abstract';
+import { createRequestHandler, type RequestHandlerInput } from '../abstract';
 
 describe(createRequestHandler, () => {
   it('returns streamed HTML responses for matched routes', async () => {
@@ -104,6 +104,34 @@ describe(createRequestHandler, () => {
 
     // Check array-value custom headers
     expect(response.headers.get('Set-Cookie')).toBe('hello=world, foo=bar');
+  });
+
+  it('does not mutate the API route response when applying headers', async () => {
+    const manifest: Manifest = {
+      htmlRoutes: [],
+      apiRoutes: [{ file: 'api.js', page: '/api', namedRegex: /^\/api\/?$/, routeKeys: {} }],
+      notFoundRoutes: [],
+      redirects: [],
+      rewrites: [],
+      headers: { 'X-Global': 'global' },
+    };
+    const apiResponse = new Response('{}', {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const handler = createRequestHandler({
+      getRoutesManifest: jest.fn(async () => manifest),
+      getHtml: jest.fn(),
+      getApiRoute: jest.fn(async () => ({ GET: async () => apiResponse })),
+      getMiddleware: jest.fn(),
+      getLoaderData: jest.fn(),
+    });
+
+    const response = await handler(new Request('http://localhost/api'));
+
+    expect(response.headers.get('X-Global')).toBe('global');
+    // Writing to the route's own Response would throw on immutable headers (e.g. from `fetch()`)
+    expect(apiResponse.headers.get('X-Global')).toBeNull();
   });
 
   describe('loader requests', () => {
@@ -389,6 +417,340 @@ describe(createRequestHandler, () => {
 
       const [loaderRequest] = getLoaderData.mock.calls[0]!;
       expect(new URL(loaderRequest.url).pathname).toBe('/nested/');
+    });
+  });
+
+  describe('pageHeaders', () => {
+    function createHandler(manifest: Manifest, overrides: Partial<RequestHandlerInput> = {}) {
+      return createRequestHandler({
+        getRoutesManifest: jest.fn(async () => manifest),
+        getHtml: jest.fn(async () => '<html></html>'),
+        getApiRoute: jest.fn(),
+        getMiddleware: jest.fn(),
+        getLoaderData: jest.fn(),
+        ...overrides,
+      });
+    }
+
+    const indexRoute = {
+      file: 'index',
+      page: '/',
+      namedRegex: /^\/$/,
+      routeKeys: {},
+    };
+
+    it('applies matching `pageHeaders` to response', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        pageHeaders: [
+          { namedRegex: /^\/$/, headers: { 'X-Frame-Options': 'DENY' } },
+          { namedRegex: /^\/other$/, headers: { 'X-Frame-Options': 'SAMEORIGIN' } },
+        ],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+    });
+
+    it('leaves response untouched when no rule matches', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        pageHeaders: [{ namedRegex: /^\/other$/, headers: { 'X-Test': 'no' } }],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('X-Test')).toBeNull();
+    });
+
+    it('page rule scalars win over global `headers`', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        headers: { 'Cache-Control': 'public, max-age=60', 'X-Powered-By': 'expo-server' },
+        pageHeaders: [
+          { namedRegex: /^\/$/, headers: { 'Cache-Control': 'no-store' } },
+        ],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('X-Powered-By')).toBe('expo-server');
+    });
+
+    it('route-authored headers win over page rule scalars', async () => {
+      const handler = createHandler(
+        {
+          htmlRoutes: [],
+          apiRoutes: [{ file: 'api.js', page: '/api', namedRegex: /^\/api\/?$/, routeKeys: {} }],
+          notFoundRoutes: [],
+          redirects: [],
+          rewrites: [],
+          headers: { 'Cache-Control': 'public, max-age=60' },
+          pageHeaders: [
+            {
+              namedRegex: /^\/api\/?$/,
+              headers: {
+                'Content-Type': 'text/plain',
+                'Cache-Control': 'no-store',
+                'X-Extra': 'set',
+              },
+            },
+          ],
+        },
+        {
+          getApiRoute: jest.fn(async () => ({
+            GET: async () =>
+              new Response('{}', {
+                headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=10' },
+              }),
+          })),
+        }
+      );
+
+      const response = await handler(new Request('http://localhost/api'));
+
+      expect(response.headers.get('Content-Type')).toBe('application/json');
+      expect(response.headers.get('Cache-Control')).toBe('max-age=10');
+      expect(response.headers.get('X-Extra')).toBe('set');
+    });
+
+    it('later matching rules win within the page layer', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        pageHeaders: [
+          {
+            namedRegex: /^\/$/,
+            headers: { 'X-Rule': 'first', 'Set-Cookie': ['a=1'] },
+          },
+          {
+            namedRegex: /^\/$/,
+            headers: { 'X-Rule': 'second', 'Set-Cookie': ['b=2'] },
+          },
+        ],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('X-Rule')).toBe('second');
+      expect(response.headers.get('Set-Cookie')).toBe('a=1, b=2');
+    });
+
+    it('appends array headers in route, global, page order', async () => {
+      const handler = createHandler(
+        {
+          htmlRoutes: [],
+          apiRoutes: [{ file: 'api.js', page: '/api', namedRegex: /^\/api\/?$/, routeKeys: {} }],
+          notFoundRoutes: [],
+          redirects: [],
+          rewrites: [],
+          headers: { 'Set-Cookie': ['global=1'] },
+          pageHeaders: [
+            { namedRegex: /^\/api\/?$/, headers: { 'Set-Cookie': ['page=1'] } },
+          ],
+        },
+        {
+          getApiRoute: jest.fn(async () => ({
+            GET: async () => new Response('{}', { headers: { 'Set-Cookie': 'route=1' } }),
+          })),
+        }
+      );
+
+      const response = await handler(new Request('http://localhost/api'));
+
+      expect(response.headers.get('Set-Cookie')).toBe('route=1, global=1, page=1');
+    });
+
+    it('accumulates array headers', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        headers: { 'Set-Cookie': ['session=1'] },
+        pageHeaders: [
+          { namedRegex: /^\/$/, headers: { 'Set-Cookie': ['a=1', 'b=2'] } },
+        ],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('Set-Cookie')).toBe('session=1, a=1, b=2');
+    });
+
+    it('appends non-cookie array headers after route-authored values', async () => {
+      const handler = createHandler(
+        {
+          htmlRoutes: [],
+          apiRoutes: [{ file: 'api.js', page: '/api', namedRegex: /^\/api\/?$/, routeKeys: {} }],
+          notFoundRoutes: [],
+          redirects: [],
+          rewrites: [],
+          pageHeaders: [
+            {
+              namedRegex: /^\/api\/?$/,
+              headers: { Link: ['<a>; rel=preload', '<b>; rel=preload'] },
+            },
+          ],
+        },
+        {
+          getApiRoute: jest.fn(async () => ({
+            GET: async () => new Response('{}', { headers: { Link: '<r>; rel=canonical' } }),
+          })),
+        }
+      );
+
+      const response = await handler(new Request('http://localhost/api'));
+
+      expect(response.headers.get('Link')).toBe(
+        '<r>; rel=canonical, <a>; rel=preload, <b>; rel=preload'
+      );
+    });
+
+    it('matches header names case-insensitively across layers', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        headers: { 'x-powered-by': 'global' },
+        pageHeaders: [{ namedRegex: /^\/$/, headers: { 'X-Powered-By': 'page' } }],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('X-Powered-By')).toBe('page');
+    });
+
+    it('accumulates a rule array onto a global scalar of the same name', async () => {
+      const handler = createHandler({
+        htmlRoutes: [indexRoute],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [],
+        headers: { 'Set-Cookie': 'global=1' },
+        pageHeaders: [{ namedRegex: /^\/$/, headers: { 'Set-Cookie': ['page=1'] } }],
+      });
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.headers.get('Set-Cookie')).toBe('global=1, page=1');
+    });
+
+    it('matches the requested path, not the rewritten target', async () => {
+      const handler = createHandler({
+        htmlRoutes: [{ file: 'new', page: '/new', namedRegex: /^\/new\/?$/, routeKeys: {} }],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [],
+        rewrites: [{ file: '', page: '/new', namedRegex: /^\/old\/?$/, routeKeys: {} }],
+        pageHeaders: [
+          { namedRegex: /^\/old\/?$/, headers: { 'X-Matched': 'old' } },
+          { namedRegex: /^\/new\/?$/, headers: { 'X-Matched': 'new' } },
+        ],
+      });
+
+      const response = await handler(new Request('http://localhost/old'));
+
+      expect(response.headers.get('X-Matched')).toBe('old');
+    });
+
+    it('does not apply `pageHeaders` to redirects', async () => {
+      const handler = createHandler({
+        htmlRoutes: [],
+        apiRoutes: [],
+        notFoundRoutes: [],
+        redirects: [{ file: '', page: '/new', namedRegex: /^\/red\/?$/, routeKeys: {} }],
+        rewrites: [],
+        pageHeaders: [{ namedRegex: /^\/red\/?$/, headers: { 'X-Matched': 'red' } }],
+      });
+
+      const response = await handler(new Request('http://localhost/red'));
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('/new');
+      expect(response.headers.get('X-Matched')).toBeNull();
+    });
+
+    it('matches loader requests by their page path', async () => {
+      const handler = createHandler(
+        {
+          htmlRoutes: [
+            {
+              file: 'blog.js',
+              page: '/blog',
+              namedRegex: /^\/blog\/?$/,
+              routeKeys: {},
+              loader: '_expo/loaders/blog.js',
+            },
+          ],
+          apiRoutes: [],
+          notFoundRoutes: [],
+          redirects: [],
+          rewrites: [],
+          pageHeaders: [
+            {
+              namedRegex: /^\/blog\/?$/,
+              headers: { 'Cache-Control': 'public, max-age=3600' },
+            },
+          ],
+        },
+        { getLoaderData: jest.fn(async () => Response.json({ ok: true })) }
+      );
+
+      const response = await handler(new Request('http://localhost/_expo/loaders/blog'));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600');
+    });
+
+    it('leaves passthrough dev error responses untouched', async () => {
+      const handler = createHandler(
+        {
+          htmlRoutes: [indexRoute],
+          apiRoutes: [],
+          notFoundRoutes: [],
+          redirects: [],
+          rewrites: [],
+          headers: { 'X-Global': 'global' },
+          pageHeaders: [{ namedRegex: /^\/$/, headers: { 'X-Page': 'page' } }],
+        },
+        {
+          getHtml: jest.fn(
+            async () =>
+              new Response('<html>error</html>', {
+                status: 500,
+                headers: { 'Content-Type': 'text/html' },
+              })
+          ),
+        }
+      );
+
+      const response = await handler(new Request('http://localhost/'));
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get('X-Global')).toBeNull();
+      expect(response.headers.get('X-Page')).toBeNull();
     });
   });
 });
